@@ -1,0 +1,198 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{xcolor}
+
+\title{Revised Project Plan:\\Closed-Loop EEG Cursor Control via Constrained RL\\[0.3em]
+\large Offline-to-Online Simulation with Comparative Decoder--Policy Analysis}
+\author{BCI Course Project --- Spring 2026}
+\date{April 2026}
+
+\begin{document}
+\maketitle
+
+%--------------------------------------------------------------
+\section{Project Summary}
+We build a closed-loop BCI cursor-control pipeline in simulation.
+A frozen neural decoder (EEGNet or LSTM) maps 64-channel motor-imagery EEG to 2-D cursor velocity.
+A Proximal Policy Optimization (PPO) agent sits on top of the decoder and outputs a \emph{corrective velocity offset} to improve target acquisition under realistic noninvasive latency (500--2000\,ms).
+The core comparison is \textbf{Naive PPO vs.\ Constrained PPO} (smoothness + zeroness penalties), evaluated across two decoder architectures.
+
+%--------------------------------------------------------------
+\section{Identified Gaps in Original Proposal}
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Latency range unrealistic.} Original 50--150\,ms matches intracortical BCIs; noninvasive EEG decoders exhibit 0.5--2\,s lag~\cite{korik2024}.
+    \item \textbf{No biomechanical constraints on RL agent.} A simple jerk penalty ($\lambda\|\Delta v\|$) allows unphysical solutions; smoothness and zeroness constraints are needed~\cite{pitt2024}.
+    \item \textbf{SAC vs.\ PPO inconsistency.} Prior BCI--RL work uses PPO; we standardize on PPO for comparability.
+    \item \textbf{No curriculum learning.} RL training on small targets from scratch is unstable; curriculum over target radius is essential.
+    \item \textbf{Missing evaluation metrics.} Added First-Touch Time, Dial-In Time, Distance Ratio, and Shannon--Welford model fit.
+    \item \textbf{No non-RL adaptation baseline.} Added Behavioral Cloning (BC) for a supervised-learning reference.
+\end{enumerate}
+
+%--------------------------------------------------------------
+\section{Architecture}
+
+\begin{verbatim}
+Raw EEG (64ch, 512Hz)
+  -> Preprocessing (bandpass, notch, CAR, ICA, epoch)
+    -> Frozen Decoder (EEGNet / LSTM) -> decoded velocity
+                                              |
+      cursor position + target position ------+
+                                              v
+                                    PPO Agent (corrective offset)
+                                              |
+                                              v
+                                    Final cursor velocity
+                                              |
+                                     Latency buffer (tau ~ U[500,2000] ms)
+                                              |
+                                              v
+                                    Simulation environment (Gym)
+\end{verbatim}
+
+%--------------------------------------------------------------
+\section{Comparative Dimensions}
+
+\begin{table}[h]
+\centering
+\caption{Methods compared along each dimension.}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Dimension} & \textbf{Methods} & \textbf{Rationale} \\
+\midrule
+Decoder        & EEGNet vs.\ LSTM RNN       & Shallow CNN vs.\ recurrent temporal model \\
+RL Policy      & Naive PPO vs.\ Constrained PPO & Main contribution: effect of constraints \\
+Baseline       & LDA decoder (no RL)        & Classical linear baseline \\
+Baseline       & Behavioral Cloning (BC)    & Non-RL adaptation reference \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%--------------------------------------------------------------
+\section{Reward Function}
+
+The Constrained PPO reward at time step $t$:
+\begin{equation}
+r_t = -\underbrace{\|p_t - g_t\|_2}_{\text{distance to target}}
+      \;-\; \lambda_{\text{jerk}}\underbrace{\|\Delta v_t\|_2}_{\text{jerk penalty}}
+      \;-\; \lambda_{\text{smooth}}\underbrace{D_{\mathrm{KL}}(\pi_t \| \pi_{t-1})}_{\text{smoothness}}
+      \;-\; \lambda_{\text{zero}}\underbrace{\|v_t\| \cdot \mathbf{1}[\|p_t - g_t\| < \epsilon]}_{\text{zeroness}}
+\end{equation}
+where $\lambda_{\text{jerk}}=0.1$, $\lambda_{\text{smooth}}\in\{0.05,0.1\}$, $\lambda_{\text{zero}}\in\{0.05,0.1\}$, and $\epsilon$ is the target acceptance radius.
+Naive PPO uses only the first two terms.
+
+%--------------------------------------------------------------
+\section{Six-Week Sprint Plan}
+
+\subsection*{Week 1: Data + Preprocessing + Baselines}
+\begin{itemize}[leftmargin=*,nosep]
+    \item Download Continuous Pursuit EEG dataset~\cite{korik2024} (28 subjects, 64-ch, 512\,Hz).
+    \item Preprocessing: bandpass 1--40\,Hz (4th-order Butterworth), 50\,Hz notch, common-average reference, ICA artifact rejection (MNE-Python), epoch into 500\,ms windows with 250\,ms stride, $z$-score per channel per session.
+    \item Session-level splits: Sessions 1--2 $\to$ train (70\%), Session 3 $\to$ RL fine-tuning (15\%), Session 4+ $\to$ test (15\%).
+    \item Train LDA baseline decoder; record baseline TAR and NMSE.
+    \item \textbf{Deliverable:} Clean data pipeline, LDA baseline numbers.
+\end{itemize}
+
+\subsection*{Week 2: Offline Decoders (EEGNet + LSTM)}
+\begin{itemize}[leftmargin=*,nosep]
+    \item Implement EEGNet (depthwise separable CNN) $\to$ 2-D velocity.
+    \item Implement LSTM decoder (same input/output interface).
+    \item Training: MSE + $\ell_2$ regularization, Adam ($\eta=10^{-3}$, cosine decay), batch size 64, early stopping on validation NMSE.
+    \item Evaluate both on held-out sessions: TAR, NMSE, Path Efficiency.
+    \item \textbf{Deliverable:} Two trained decoders with offline comparison table.
+\end{itemize}
+
+\subsection*{Week 3: Simulation Environment + RL Setup}
+\begin{itemize}[leftmargin=*,nosep]
+    \item Build Gymnasium-compatible environment:
+    \begin{itemize}[nosep]
+        \item \textbf{State:} decoder output $\oplus$ cursor position $\oplus$ target position $\oplus$ velocity history (last 5 steps).
+        \item \textbf{Action:} corrective velocity offset (continuous, clipped to $[-1,1]$).
+        \item \textbf{Latency:} stochastic delay $\tau \sim \mathcal{U}[500, 2000]$\,ms.
+    \end{itemize}
+    \item Implement curriculum learning: target acceptance radius $120\,\text{mm} \to 60\,\text{mm} \to 30\,\text{mm}$.
+    \item Freeze decoder weights throughout RL training.
+    \item \textbf{Deliverable:} Working Gym environment with latency injection and curriculum.
+\end{itemize}
+
+\subsection*{Week 4: RL Training + BC Baseline}
+\begin{itemize}[leftmargin=*,nosep]
+    \item \textbf{Naive PPO:} Stable-Baselines3 PPO, reward uses distance + jerk terms only.
+    \item \textbf{Constrained PPO:} Add smoothness (KL) and zeroness penalties to reward.
+    \item \textbf{Behavioral Cloning:} Supervised policy trained on best offline trajectories.
+    \item Hyperparameter grid (12 configs): lr $\in\{3\!\times\!10^{-4}, 1\!\times\!10^{-4}\}$, $\lambda_{\text{smooth}}\in\{0.05, 0.1\}$, $\lambda_{\text{zero}}\in\{0.05, 0.1\}$.
+    \item Train on Session 3 data from 5 subjects.
+    \item \textbf{Deliverable:} Trained policies --- 4 conditions per decoder (No-RL, BC, NaivePPO, ConstrainedPPO).
+\end{itemize}
+
+\subsection*{Week 5: Evaluation + Cross-Subject Generalization}
+\begin{itemize}[leftmargin=*,nosep]
+    \item Full metric suite on held-out sessions:
+    \begin{itemize}[nosep]
+        \item \textbf{Primary:} TAR ($>$55\%), NMSE ($<$0.30), Path Efficiency ($>$0.60), Jerk reduction ($>$30\%).
+        \item \textbf{Secondary:} First-Touch Time, Dial-In Time, Distance Ratio, Bitrate.
+        \item \textbf{Bonus:} Shannon--Welford model fit vs.\ Fitts's Law.
+    \end{itemize}
+    \item Cross-subject: train on 23 subjects, test on 5 held-out.
+    \item Statistical testing: paired Wilcoxon signed-rank, Bonferroni correction ($p<0.05$).
+    \item \textbf{Deliverable:} Results tables, trajectory visualizations, statistical analysis.
+\end{itemize}
+
+\subsection*{Week 6: Report + Deliverables}
+\begin{itemize}[leftmargin=*,nosep]
+    \item IEEE 8-page report:
+    \begin{itemize}[nosep]
+        \item Main comparison table: LDA vs.\ EEGNet vs.\ LSTM $\times$ NoRL vs.\ BC vs.\ NaivePPO vs.\ ConstrainedPPO.
+        \item Trajectory plots (best/worst subjects).
+        \item Ablation: effect of latency range, curriculum, constraints.
+    \end{itemize}
+    \item Code freeze, Docker image, reproducibility check (fixed seeds, W\&B logging).
+    \item Poster draft (A0) + 5-min video demo.
+    \item \textbf{Deliverable:} Final submission package.
+\end{itemize}
+
+%--------------------------------------------------------------
+\section{Evaluation Summary}
+
+\begin{table}[h]
+\centering
+\caption{Evaluation metrics and targets.}
+\begin{tabular}{@{}llc@{}}
+\toprule
+\textbf{Metric} & \textbf{Description} & \textbf{Target} \\
+\midrule
+Target Acquisition Rate (TAR) & \% trials cursor reaches target & $>$55\% \\
+Normalized MSE (NMSE) & Cursor--target trajectory error & $<$0.30 \\
+Path Efficiency (PE) & Ideal / actual path length & $>$0.60 \\
+Jerk Reduction & $\|\ddot{v}\|_2$ mean vs.\ offline & $>$30\% \\
+First-Touch Time (FTT) & Time to first target entry & Lower is better \\
+Dial-In Time (DIT) & Time to stabilize on target & Lower is better \\
+Distance Ratio & Actual / straight-line path & Closer to 1.0 \\
+Inference Latency & Decoder + policy wall-clock & $<$50\,ms \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%--------------------------------------------------------------
+\section{Resources}
+
+\begin{itemize}[leftmargin=*,nosep]
+    \item \textbf{Compute:} 1$\times$ NVIDIA A100 40\,GB (university HPC); est.\ 48 GPU-hours.
+    \item \textbf{Libraries:} Python 3.11, MNE-Python 1.7, PyTorch 2.3, Stable-Baselines3 2.3, Gymnasium, NumPy/SciPy.
+    \item \textbf{Data:} Continuous Pursuit EEG BCI Dataset~\cite{korik2024} (CC-BY 4.0).
+    \item \textbf{Reproducibility:} Fixed seeds (NumPy, PyTorch, SB3), DVC for data versioning, Docker image, W\&B tracking.
+\end{itemize}
+
+%--------------------------------------------------------------
+\begin{thebibliography}{9}
+\bibitem{korik2024} A.~Korik et al., ``A continuous pursuit dataset for online deep learning-based EEG brain-computer interface,'' \textit{Scientific Data}, vol.~11, 2024.
+\bibitem{pitt2024} B.~Pitt and R.~Kramer, ``A reinforcement learning based software simulator for motor brain-computer interfaces,'' \textit{PMC}, 2024.
+\bibitem{shin2022} N.~Shin et al., ``Closed-loop motor imagery EEG simulation for brain-computer interfaces,'' \textit{Frontiers in Human Neuroscience}, vol.~16, 2022.
+\bibitem{lawhern2018} V.~J.~Lawhern et al., ``EEGNet: A compact convolutional neural network for EEG-based brain-computer interfaces,'' \textit{J.\ Neural Eng.}, vol.~15, no.~5, 2018.
+\end{thebibliography}
+
+\end{document}
