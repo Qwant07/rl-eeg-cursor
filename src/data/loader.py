@@ -19,7 +19,7 @@ def load_run(mat_path: str):
     """
     with h5py.File(mat_path, 'r') as f:
         eeg = f['eeg/data'][:]                    # (n_samples, 62)
-        fs = float(f['eeg/fs'][0, 0])
+        fs = float(np.asarray(f['eeg/fs']).flat[0])
         eeg_times = f['eeg/times'][:, 0]          # (n_samples,)
         cursor_vel_x = f['eeg/cursorvel/x'][:, 0]
         cursor_vel_y = f['eeg/cursorvel/y'][:, 0]

@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from src.data.loader import load_run
 
-MAT_PATH = "project_cursor/data/S01/S01_Se01_AR_R01.mat"
+MAT_PATH = "data/S01/S01_Se01_AR_R01.mat"
 
 
 def test_load_run_shapes():
@@ -24,3 +24,7 @@ def test_load_run_dtypes():
     eeg, cursor_vel, cursor_pos, target_pos, eeg_times, pos_times, fs = load_run(MAT_PATH)
     assert eeg.dtype == np.float64
     assert cursor_vel.dtype == np.float64
+    assert cursor_pos.dtype == np.float64
+    assert target_pos.dtype == np.float64
+    assert eeg_times.dtype == np.float64
+    assert pos_times.dtype == np.float64
