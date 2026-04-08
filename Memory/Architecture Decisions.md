@@ -13,9 +13,9 @@ tags: [memory, architecture]
 - **Local (M1 Mac):** `preprocess.py` only
 - **Colab (GPU):** decoder training, RL training, evaluation
 
-## File Structure
+## File Structure (Expanded for Full Pipeline)
 ```
-project_cursor/
+rl-eeg-cursor/
   src/
     data/
       loader.py          ← load_run(): h5py → numpy
@@ -23,11 +23,29 @@ project_cursor/
       hdf5_writer.py     ← HDF5Writer context manager
     baselines/
       lda_decoder.py     ← BandPowerLDA
+    decoders/             ← Week 2
+      eegnet.py          ← EEGNet CNN decoder
+      lstm.py            ← LSTM decoder
+      train.py           ← shared training loop
+    envs/                 ← Week 3
+      cursor_env.py      ← Gymnasium cursor environment
+      encoder.py         ← neural encoder (synthetic EEG)
+    agents/               ← Week 4
+      ppo.py             ← Naïve PPO wrapper (stable-baselines3)
+      constrained_ppo.py ← Constrained PPO (KL penalties)
+      bc.py              ← Behavior Cloning baseline
+    evaluation/           ← Week 5
+      metrics.py         ← FTT, DIT, path efficiency, Shannon–Welford
+      ablations.py       ← ablation experiment runner
     preprocess.py        ← CLI script
   tests/
     data/
     baselines/
+    decoders/
+    envs/
+    agents/
   preprocessed/          ← HDF5 output files
+  Memory/                ← Obsidian vault (project notes)
 ```
 
 ## Key Interface

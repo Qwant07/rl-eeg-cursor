@@ -9,7 +9,7 @@ tags: [memory, user]
 - **PyTorch** — comfortable
 - **MNE-Python** — somewhat familiar
 - **Gymnasium** — new, needs scaffolding
-- Hardware: M1 MacBook, 8 GB RAM, no GPU, ~7 GB free storage
+- Hardware: Linux workstation (Arch Linux, kernel 6.19.11) — also has M1 MacBook
 - Uses **Google Colab** for GPU training, data served from **Google Drive**
 
 ## Links

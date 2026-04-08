@@ -31,11 +31,27 @@ tags: [memory, data]
 - No cross-subject generalization (only 2 subjects)
 - Per-session ablations across sessions 4–8 replace cross-subject evaluation
 
+## Data Path Status (2026-04-08)
+
+> [!success] Path Fixed
+> Fresh extraction from `../data.zip` into `data/`. Duplicate `data (2)/` removed.
+> `.mat` files now at `data/S01/` (104 files) and `data/S05/` (104 files).
+
+- HDF5 preprocessed files generated (2026-04-08):
+  - `preprocessed/S01_preprocessed.h5` — 6.8 GB, 104 runs, ~1268 epochs/run
+  - `preprocessed/S05_preprocessed.h5` — 15 GB, 104 runs, ~1268 epochs/run
+
 ## Secondary Dataset
 - Shin et al. 2022 (Closed-loop Motor Imagery EEG Simulation)
-- Located at: `project_cursor/data/20383716.zip`
-- 10 subjects, 1D/2D cursor control — available for future use
+- Located at: `data/data/20383716.zip` and `data (2)/data/20383716.zip`
+- 10 subjects, 1D/2D cursor control — needed for Week 3 (simulator validation)
+
+## Additional Datasets (from Deep Research Report)
+- PhysioNet EEG MI (109 subjects, cued MI) — optional pretraining
+- BCI Competition IV 2a (9 subjects, 4-class MI) — benchmark
+- Forenzo et al. 2024 is the primary dataset we already have (S01, S05)
 
 ## Links
 - [[BCI Project Index]]
 - [[Project Overview]]
+- [[Enhanced Project Plan]]
