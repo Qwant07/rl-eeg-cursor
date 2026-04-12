@@ -34,14 +34,21 @@ class EEGDataset(Dataset):
     """PyTorch dataset that loads epochs from an HDF5 file by session.
 
     Args:
-        h5_path:  Path to the preprocessed HDF5 file.
-        subject:  Subject key, e.g. "S01".
-        sessions: List of session numbers to include (1-indexed).
+        h5_path:    Path to the preprocessed HDF5 file.
+        subject:    Subject key, e.g. "S01".
+        sessions:   List of session numbers to include (1-indexed).
+        max_samples: Cap total loaded epochs (0 = unlimited).
+        run_types:  Which run types to load, e.g. ["AR"]. None = all.
+        y_mean:     Pre-computed label mean for normalization (None = compute).
+        y_std:      Pre-computed label std for normalization (None = compute).
     """
 
     def __init__(
         self, h5_path: str, subject: str, sessions: List[int],
         max_samples: int = 0,
+        run_types: List[str] = None,
+        y_mean: np.ndarray = None,
+        y_std: np.ndarray = None,
     ):
         X_parts, y_parts = [], []
         total = 0
@@ -53,6 +60,8 @@ class EEGDataset(Dataset):
                     continue
                 sess_grp = subj_grp[sess_key]
                 for run_type in sorted(sess_grp):
+                    if run_types is not None and run_type not in run_types:
+                        continue
                     for run_key in sorted(sess_grp[run_type]):
                         run_grp = sess_grp[run_type][run_key]
                         x = run_grp["X"][:]
@@ -75,6 +84,16 @@ class EEGDataset(Dataset):
         if max_samples > 0 and len(self.X) > max_samples:
             self.X = self.X[:max_samples]
             self.y = self.y[:max_samples]
+
+        # Z-score normalize velocity labels
+        if y_mean is not None and y_std is not None:
+            self.y_mean = y_mean.astype(np.float32)
+            self.y_std = y_std.astype(np.float32)
+        else:
+            self.y_mean = self.y.mean(axis=0)
+            self.y_std = self.y.std(axis=0)
+            self.y_std[self.y_std == 0] = 1.0
+        self.y = (self.y - self.y_mean) / self.y_std
 
     def __len__(self) -> int:
         return len(self.X)
@@ -263,6 +282,10 @@ def main():
         "--max_samples", type=int, default=0,
         help="Cap loaded epochs per split (0=unlimited). Useful for quick local tests."
     )
+    parser.add_argument(
+        "--run_types", type=str, nargs="+", default=["AR"],
+        help="Run types to load (default: AR only). Use --run_types AR Chance for all."
+    )
     args = parser.parse_args()
 
     # Device
@@ -274,11 +297,18 @@ def main():
 
     # Data
     h5_path = os.path.join(args.h5_dir, f"{args.subject}_preprocessed.h5")
-    print(f"Loading training data: sessions {args.train_sessions} ...")
-    train_ds = EEGDataset(h5_path, args.subject, args.train_sessions, max_samples=args.max_samples)
+    print(f"Loading training data: sessions {args.train_sessions}, run_types={args.run_types} ...")
+    train_ds = EEGDataset(
+        h5_path, args.subject, args.train_sessions,
+        max_samples=args.max_samples, run_types=args.run_types,
+    )
     print(f"  → {len(train_ds)} training epochs")
     print(f"Loading validation data: sessions {args.val_sessions} ...")
-    val_ds = EEGDataset(h5_path, args.subject, args.val_sessions, max_samples=args.max_samples)
+    val_ds = EEGDataset(
+        h5_path, args.subject, args.val_sessions,
+        max_samples=args.max_samples, run_types=args.run_types,
+        y_mean=train_ds.y_mean, y_std=train_ds.y_std,
+    )
     print(f"  → {len(val_ds)} validation epochs")
 
     train_loader = DataLoader(
@@ -320,6 +350,15 @@ def main():
     weights_path = out_dir / "best_model.pt"
     torch.save(model.state_dict(), weights_path)
     print(f"Saved weights → {weights_path}")
+
+    # Save y normalization stats for inference
+    norm_path = out_dir / "y_norm.json"
+    with open(norm_path, "w") as f:
+        json.dump({
+            "y_mean": train_ds.y_mean.tolist(),
+            "y_std": train_ds.y_std.tolist(),
+        }, f, indent=2)
+    print(f"Saved y normalization → {norm_path}")
 
     history_path = out_dir / "history.json"
     with open(history_path, "w") as f:

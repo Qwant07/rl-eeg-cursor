@@ -37,21 +37,30 @@ def synthetic_h5(tmp_path):
                 grp.create_dataset("target", data=rng.randn(N_EPOCHS_PER_RUN, 2).astype(np.float32))
                 grp.create_dataset("mean", data=rng.randn(N_CH).astype(np.float64))
                 grp.create_dataset("std", data=np.abs(rng.randn(N_CH)).astype(np.float64) + 0.1)
+            # Add a Chance run per session
+            key = f"S01/session_{sess:02d}/Chance/run_01"
+            grp = f.create_group(key)
+            grp.create_dataset("X", data=rng.randn(N_EPOCHS_PER_RUN, N_CH, N_TIMES).astype(np.float32))
+            grp.create_dataset("y", data=rng.randn(N_EPOCHS_PER_RUN, N_OUTPUTS).astype(np.float32))
+            grp.create_dataset("cursor", data=rng.randn(N_EPOCHS_PER_RUN, 2).astype(np.float32))
+            grp.create_dataset("target", data=rng.randn(N_EPOCHS_PER_RUN, 2).astype(np.float32))
+            grp.create_dataset("mean", data=rng.randn(N_CH).astype(np.float64))
+            grp.create_dataset("std", data=np.abs(rng.randn(N_CH)).astype(np.float64) + 0.1)
     return h5_path
 
 
 class TestEEGDataset:
     def test_loads_correct_sessions(self, synthetic_h5):
-        ds = EEGDataset(synthetic_h5, "S01", sessions=[1, 2])
-        # 2 sessions × 2 runs × 20 epochs = 80
+        ds = EEGDataset(synthetic_h5, "S01", sessions=[1, 2], run_types=["AR"])
+        # 2 sessions × 2 AR runs × 20 epochs = 80
         assert len(ds) == 80
 
     def test_single_session(self, synthetic_h5):
-        ds = EEGDataset(synthetic_h5, "S01", sessions=[3])
-        assert len(ds) == 40  # 1 session × 2 runs × 20
+        ds = EEGDataset(synthetic_h5, "S01", sessions=[3], run_types=["AR"])
+        assert len(ds) == 40  # 1 session × 2 AR runs × 20
 
     def test_shapes(self, synthetic_h5):
-        ds = EEGDataset(synthetic_h5, "S01", sessions=[1])
+        ds = EEGDataset(synthetic_h5, "S01", sessions=[1], run_types=["AR"])
         X, y = ds[0]
         assert X.shape == (N_CH, N_TIMES)
         assert y.shape == (N_OUTPUTS,)
@@ -59,7 +68,32 @@ class TestEEGDataset:
 
     def test_missing_session_raises(self, synthetic_h5):
         with pytest.raises(ValueError):
-            EEGDataset(synthetic_h5, "S01", sessions=[99])
+            EEGDataset(synthetic_h5, "S01", sessions=[99], run_types=["AR"])
+
+    def test_run_types_filter(self, synthetic_h5):
+        """AR-only should exclude Chance runs."""
+        ds_ar = EEGDataset(synthetic_h5, "S01", sessions=[1], run_types=["AR"])
+        ds_all = EEGDataset(synthetic_h5, "S01", sessions=[1], run_types=None)
+        # AR: 2 runs × 20 = 40; All: 2 AR + 1 Chance = 60
+        assert len(ds_ar) == 40
+        assert len(ds_all) == 60
+
+    def test_y_normalization(self, synthetic_h5):
+        """Y should be z-score normalized."""
+        ds = EEGDataset(synthetic_h5, "S01", sessions=[1], run_types=["AR"])
+        # Normalized y should have mean ≈ 0 and std ≈ 1
+        assert abs(ds.y[:, 0].mean()) < 0.2
+        assert abs(ds.y[:, 1].mean()) < 0.2
+
+    def test_val_uses_train_y_stats(self, synthetic_h5):
+        """Validation set should use training set's y normalization stats."""
+        train_ds = EEGDataset(synthetic_h5, "S01", sessions=[1], run_types=["AR"])
+        val_ds = EEGDataset(
+            synthetic_h5, "S01", sessions=[3], run_types=["AR"],
+            y_mean=train_ds.y_mean, y_std=train_ds.y_std,
+        )
+        np.testing.assert_array_equal(val_ds.y_mean, train_ds.y_mean)
+        np.testing.assert_array_equal(val_ds.y_std, train_ds.y_std)
 
 
 class TestComputeMetrics:
@@ -97,8 +131,9 @@ class TestBuildModel:
 class TestTrainLoop:
     def test_short_training_runs(self, synthetic_h5):
         """Run 5 epochs and verify outputs are sane."""
-        train_ds = EEGDataset(synthetic_h5, "S01", sessions=[1, 2])
-        val_ds = EEGDataset(synthetic_h5, "S01", sessions=[3])
+        train_ds = EEGDataset(synthetic_h5, "S01", sessions=[1, 2], run_types=["AR"])
+        val_ds = EEGDataset(synthetic_h5, "S01", sessions=[3], run_types=["AR"],
+                            y_mean=train_ds.y_mean, y_std=train_ds.y_std)
         train_loader = DataLoader(train_ds, batch_size=16, shuffle=True)
         val_loader = DataLoader(val_ds, batch_size=16)
 
@@ -123,8 +158,9 @@ class TestTrainLoop:
 
     def test_early_stopping(self, synthetic_h5):
         """With patience=1 and random data, should stop early."""
-        train_ds = EEGDataset(synthetic_h5, "S01", sessions=[1])
-        val_ds = EEGDataset(synthetic_h5, "S01", sessions=[3])
+        train_ds = EEGDataset(synthetic_h5, "S01", sessions=[1], run_types=["AR"])
+        val_ds = EEGDataset(synthetic_h5, "S01", sessions=[3], run_types=["AR"],
+                            y_mean=train_ds.y_mean, y_std=train_ds.y_std)
         train_loader = DataLoader(train_ds, batch_size=40)
         val_loader = DataLoader(val_ds, batch_size=40)
 
@@ -139,7 +175,7 @@ class TestTrainLoop:
         assert actual_epochs < 100
 
     def test_evaluate(self, synthetic_h5):
-        val_ds = EEGDataset(synthetic_h5, "S01", sessions=[3])
+        val_ds = EEGDataset(synthetic_h5, "S01", sessions=[3], run_types=["AR"])
         val_loader = DataLoader(val_ds, batch_size=16)
         model = build_model("eegnet")
         device = torch.device("cpu")
