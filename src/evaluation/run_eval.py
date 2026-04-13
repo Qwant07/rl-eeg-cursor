@@ -93,16 +93,19 @@ def evaluate_policy(
 
 
 def proportional_policy(obs: np.ndarray, gain: float = 1.0) -> np.ndarray:
-    """Proportional controller: action = gain * normalized_direction."""
+    """Proportional controller: full-speed unit vector toward target.
+
+    Matches the controller used during training/baseline evaluation.
+    Observations are normalized (cursor_pos / workspace), but the
+    direction is scale-invariant so we just use normalized coords.
+    """
     cursor = obs[:2]
     target = obs[2:4]
     diff = target - cursor
     dist = np.linalg.norm(diff)
     if dist < 0.01:
         return np.zeros(2, dtype=np.float32)
-    direction = diff / dist
-    speed = min(gain * dist, 1.0)
-    return (direction * speed).astype(np.float32)
+    return (diff / dist).astype(np.float32)
 
 
 def make_eval_env(subject: str, latency_steps: int = 0, seed: int = 99) -> CursorEnv:
